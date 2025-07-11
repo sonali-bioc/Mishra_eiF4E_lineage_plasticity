@@ -1,0 +1,37 @@
+---
+title: "Mass Spec Analysis"
+output: html_document
+date: "July 10, 2025"
+---
+
+# Volcano Plots 
+```{r setup}
+rm(list=ls())
+library(readxl)
+library(calibrate)
+
+res = as.data.frame(read_xlsx("HPG-TMT_v1.xlsx" , sheet = 1) )
+colnames(res)[1] = "gene"
+res$log10padj = -log10(res[,3])
+lfc_cutoff  = log2(1.10)
+
+rm2 = which(is.na(res[,3]))
+res = res[ -rm2, ]
+
+rm1 = which(duplicated(res[,1]))
+res = res[ -rm1, ]
+res$regulation = "not-regulated"
+res[which(res[,3]<.05 & res$logFc>lfc_cutoff), "regulation" ] ="upregulated"
+res[which(res[,3]<.05 & res$logFc < -lfc_cutoff), "regulation" ] ="down-regulated"
+
+with(res, plot(logFc, log10padj, pch=20, col ="grey80",main=paste0("Volcano plot") ))
+with(subset(res, res[,3]<.05 & logFc>lfc_cutoff), points(logFc, log10padj, pch=20, col="red"))
+with(subset(res, res[,3]<.05 & logFc < -lfc_cutoff), points(logFc, log10padj, pch=20, col="blue"))
+with(subset(res[which(!is.na(res$delabel)), ]), points(logFc, log10padj, pch=20, col="black"))
+abline(v = lfc_cutoff , col = "black", lty = 2)
+abline(v = -lfc_cutoff, col = "black", lty = 2)
+abline(h = -log10(0.05), col = "black", lty = 2)
+with(res[which(res[,1] %in% goi1), ], points(logFc, log10padj, pch=20,  col="black"))
+with(res[which(res[,1] %in% goi1), ], textxy(logFc, log10padj, labs=gene, cex=1) )
+
+```
