@@ -1,0 +1,111 @@
+---
+title: "DEG Analysis"
+output: html_document
+date: "July 10, 2025"
+---
+
+In this file, we walk through the DEG analysis and the subsequent enrichment analysis. 
+
+```{r setup}
+rm(list=ls())
+
+library(edgeR)
+library(ggplot2)
+library(pheatmap)
+library(RColorBrewer)
+
+# raw counts
+df = read.delim("RM_rnaseq__hg38_raw_protein_coding_genes.txt", header=T, stringsAsFactors = FALSE, row.names=7)
+
+# set up the sample information
+coldata = do.call(rbind, strsplit(colnames(df), "[.]"))[, 3:4]
+coldata = as.data.frame(coldata)
+coldata = cbind(coldata , sampleName = colnames(df))
+colnames(coldata)[1:2] = c("time", "type")
+coldata[grep("DMSO", coldata[,2]),2] ="DMSO"
+coldata[-grep("DMSO", coldata[,2]),2] ="4EI"
+
+# calculate cpm counts 
+dataMtrx= mat1 = cpm(df)
+
+```
+
+# Exploratory plots
+
+```{r}
+# add in PCA 
+pc1= prcomp(t( dataMtrx) )
+percentVar <- (pc1$sdev^2 / sum( pc1$sdev^2 ) )*100
+percentVar= round(percentVar[1:2], 2)
+pc_data1 = data.frame(PC1=pc1$x[,1], PC2=pc1$x[,2] )
+message(" PCA =", " pc1:", percentVar[1], " pc2:", percentVar[2])
+
+
+sampleDists <- dist( t(dataMtrx))
+sampleNames = colnames(dataMtrx)
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <-sampleNames
+colnames(sampleDistMatrix) <- sampleNames
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+
+hc = hclust(sampleDists)
+
+pc_data1 = data.frame(pc_data1, coldata )
+p1 = ggplot(pc_data1, aes(PC1, PC2, color=type, shape = time)) + geom_point(size=4) +
+    xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+    ylab(paste0("PC2: ",percentVar[2],"% variance"))+
+    geom_text(aes(label=sampleNames),hjust=1, vjust=2, size=4)+
+    ggtitle(paste0("PCA plot ")) + 
+    theme(plot.title = element_text(lineheight=.8, face="bold"))
+
+pdf(paste0("exploratory_plots.pdf"), width = 10, height = 7)
+plot(hc)
+print(p1)
+dev.off()
+
+```
+
+## DEG analysis 
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = df, 
+                                colData = coldata, design = ~ sampleGroup)
+keep <- rowSums(counts(dds)) >= 4
+dds = dds[keep, ]
+  
+dds = DESeq(dds)
+lfc = log2(1.10)
+res1 <- results(dds, alpha = 0.05,  contrast = c("sampleGroup", "test", "control"))
+
+resdf = as.data.frame(res1)
+raw_counts = rawdata[rownames(resdf), ]
+cpm_counts = cpm(raw_counts)
+colnames(raw_counts) = paste0("raw_", colnames(raw_counts))
+colnames(cpm_counts) = paste0("cpm_", colnames(cpm_counts))
+resdf = cbind(gene = rownames(resdf), resdf[, c("log2FoldChange", "pvalue", "padj")] , cpm_counts, raw_counts)
+
+up_genes = resdf[ which(resdf$log2FoldChange > lfc &  resdf$padj < 0.05), ]
+down_genes = resdf[which(resdf$log2FoldChange < -lfc &  resdf$padj < 0.05), ]  
+
+up_genes = up_genes[order(up_genes$log2FoldChange, decreasing=T), ]
+down_genes = down_genes[order(down_genes$log2FoldChange), ]
+
+lst = list(all_genes = resdf, up_genes = up_genes, down_genes = down_genes)
+write_xlsx(lst,"DESeq2_analysis_6hr.xlsx")
+```
+
+## enrichment analysis
+
+```{r}
+library(writexl)
+library(enrichR)
+my_enrichment_function = function(goi, title, res_folder){
+    dbs <- c("GO_Molecular_Function_2023", "GO_Cellular_Component_2023", 
+             "GO_Biological_Process_2023", "KEGG_2021_Human", "Reactome_2022")
+    enriched = enrichr( goi, dbs)
+    write_xlsx(x = enriched, path = file.path(res_folder, paste0(title, ".xlsx")) )
+    enriched
+}
+ a1 = my_enrichment_function( goi = rownames(up_genes), title  = paste0("Enrichr_up_reg_genes_", fname), res_folder = getwd() )
+ b1= my_enrichment_function( goi = rownames(down_genes), title  = paste0("Enrichr_down_reg_genes_", fname), res_folder = getwd() )
+```
